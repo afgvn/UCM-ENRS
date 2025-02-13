@@ -1,0 +1,7 @@
+pandapower[all]
+fastapi 
+uvicorn
+dash
+nest_asyncio 
+pandas 
+matplotlib 

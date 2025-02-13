@@ -1,0 +1,6 @@
+Data*
+*.xlsx
+env*/
+Memories*/
+*.pyc
+Modelos*/
