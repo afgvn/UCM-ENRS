@@ -1,7 +1,7 @@
 pandapower[all]
+dash
+pandas
+nest_asyncio 
+matplotlib 
 fastapi 
 uvicorn
-dash
-nest_asyncio 
-pandas 
-matplotlib 
