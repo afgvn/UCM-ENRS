@@ -1,7 +1,4 @@
 pandapower[all]
 dash
 pandas
-nest_asyncio 
-matplotlib 
-fastapi 
-uvicorn
+joblib
