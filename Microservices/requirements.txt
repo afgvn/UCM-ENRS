@@ -2,3 +2,6 @@ pandapower[all]
 dash
 pandas
 joblib
+keras
+tensorflow
+scikit-learn

@@ -1,17 +1,22 @@
+import os
 import random
 import base64
 import joblib
+import numpy as np
 import pandas as pd
 from io import BytesIO ,StringIO
 
+import matplotlib
+matplotlib.use('Agg')
 
 import plotly.express as px
 import pandapower as pp
 import pandapower.networks as pn
-import matplotlib.pyplot as plt
+import matplotlib.pyplot as mplt
 
 from dash import Dash, html, dash_table, dcc
 from dash.dependencies import Input, Output ,State
+from sklearn.preprocessing import  MinMaxScaler 
 
 max_size_nodes = 24
 nodes = 18
@@ -22,12 +27,15 @@ num_scenarios = 5
 time_steps_simulation = num_intervals * 14
 
 base_output_path = f"./Microservices/Data"
-common_folder=f"{base_output_path}/train_data/AV3/case_net_generate_n_22_scenario_11"
+common_folder=f"{base_output_path}/default"
 loads_files=f"{common_folder}/load/load.csv"
 matrix_file=f"{common_folder}/indicen_matriz/incidence_matrix.csv" 
 df_matrix = pd.read_csv(matrix_file ,header=[0])
 df_matrix.rename(columns={"Unnamed: 0":"lines_id"},inplace=True)
 df_matrix.set_index("lines_id",inplace=True)
+df_matrix_gen = pd.read_csv(matrix_file ,header=[0])
+df_matrix_gen.rename(columns={"Unnamed: 0":"lines_id"},inplace=True)
+df_matrix_gen.set_index("lines_id",inplace=True)
 df_loads = pd.read_csv(loads_files ,header=[0])
 
 select_columns_table = df_loads.columns
@@ -37,7 +45,7 @@ vm_columns = [column for column in df_loads.columns if 'vm' in column]
 va_degree_columns = [column for column in df_loads.columns if 'va_degree' in column]
 external_stylesheets = ['https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css']
 
-
+@staticmethod
 def create_network(net_type=0):
     if net_type == 0:
         net =pn.simple_four_bus_system()
@@ -49,7 +57,21 @@ def create_network(net_type=0):
         net = pn.case14()
     return net
 
+@staticmethod
+def print_bw_matrix(df):
+    fig, ax = mplt.subplots(figsize=(5, 5))
+    mplt.matshow(df, cmap='gray', fignum=fig.number)
+    mplt.xticks(ticks=np.arange(df.shape[1]), labels=df.columns)
+    mplt.yticks(ticks=np.arange(df.shape[0]), labels=df.index)
+    mplt.colorbar()
+    buffer = BytesIO()
+    fig.savefig(buffer, format='png')
+    buffer.seek(0)
+    image_base64 = base64.b64encode(buffer.read()).decode('utf-8')
+    mplt.close(fig)
+    return image_base64
 
+@staticmethod
 def plot_simple_df_net(df:pd.DataFrame):
     df = df.transpose()
     net = pp.create_empty_network()
@@ -78,7 +100,7 @@ def plot_simple_df_net(df:pd.DataFrame):
         pp.create_gen(net, bus=bus, p_mw=random.uniform(3.0, 6.0), vm_pu=1.02, name=f"Gen {bus}")
 
     pp.create_ext_grid(net, bus=slack_bus, vm_pu=1.02)
-    fig, ax = plt.subplots()
+    fig, ax = mplt.subplots(figsize=(5, 5))
     pp.plotting.simple_plot(net, ax=ax)
     buffer = BytesIO()
     fig.savefig(buffer, format='png')
@@ -86,12 +108,12 @@ def plot_simple_df_net(df:pd.DataFrame):
     image_base64 = base64.b64encode(buffer.read()).decode('utf-8')
     return image_base64
 
-
+@staticmethod
 def generate_image():
     net = create_network(random.randint(0,3))
     slack_bus = 0
     pp.create_ext_grid(net, bus=slack_bus, vm_pu=1.02)
-    fig, ax = plt.subplots()
+    fig, ax = mplt.subplots(figsize=(5, 5))
     pp.plotting.simple_plot(net, ax=ax)
     buffer = BytesIO()
     fig.savefig(buffer, format='png')
@@ -99,12 +121,30 @@ def generate_image():
     image_base64 = base64.b64encode(buffer.read()).decode('utf-8')
     return image_base64
 
+@staticmethod
+def add_columns(df, prefix, total_columns):
+   columns = [col.split("_")[-1] for col in df.columns if prefix in col ] 
+   max_col = max(columns)
+   for col in range( int(max_col) , total_columns+1):
+       column = f" {prefix}{col}"
+       df[column]= 0.0
 
-# model_output_path ="./Modelos/{}"
-# model_cargado5 = joblib.load(model_output_path.format("model_lstm_cnn-mask-zeros-001D"))
+   return df
+
+model_output_path ="./Microservices/Modelos/{}"
+model_default = joblib.load(model_output_path.format("model_lstm_cnn_V1_final"))
+
+model_files = [os.path.join(model_output_path.format(""), str(nombre)) for nombre in os.listdir(model_output_path.format(""))]
+model_names_files = [nombre for nombre in os.listdir(model_output_path.format(""))]
+
+
+static_image_path = '/assets/logo_ucm_ntic.png'
+
 
 
 app = Dash(__name__ ,external_stylesheets=external_stylesheets) # 
+server = app.server 
+
 app.layout = html.Div(className='container', children=[
     html.H1('Electric Network Reconstruction System ENRS', className='text-center my-4'),
     html.Div(className='row', children=[
@@ -129,42 +169,30 @@ app.layout = html.Div(className='container', children=[
                         multiple=False
                     ),
                 ]),
-                html.Div(className='col-md-4', children=[
-                html.Label('Modelo de Reconstruccion:', className='form-label'),
-                dcc.Dropdown(
-                    id='model-selector',
-                    options=[
-                        {'label': 'Model A', 'value': 'res_p'},
-                        {'label': 'Model B', 'value': 'res_q'},
-                        {'label': 'Model C', 'value': 'vm_pu'},
-                        {'label': 'Model D', 'value': 'va_degree'}
-                    ],
-                    value='res_p',
-                ),
-            html.Button('Ejecutar', id='update-form-button', n_clicks=0, className='btn btn-success mt-3'),
-            html.Div(id='output-form', className='mt-6', style={'padding': '20px'}),
-            ]),
+               html.Div(id='dynamic-content', className='col-md-8'),
+            html.Button('Ejecutar', id='execute-button', n_clicks=0, className='btn btn-success mt-3', style={'display': 'none'}),
+            html.Button('Actualizar Imagen', id='graph-button', n_clicks=0, className='btn btn-primary mt-3', style={'display': 'none'}),
         ]),
         html.Div(className='col-md-4', children=[
-            html.Div(className='form-group', children=[
-                html.Label('Numero de Nodos:', className='form-label'),
-                dcc.Input(id='input-integer-1', type='number', value=0, className='form-control'),
-            ]),
-            html.Div(className='form-group', children=[
-                html.Label('Numero de Cargas:', className='form-label'),
-                dcc.Input(id='input-integer-2', type='number', value=0, className='form-control'),
-            ]),
+            html.Img(id="static-img", src=static_image_path, className='img-fluid', style={'padding': '30px'}),
         ]),
     ]),
+    html.H3('Red Original', className='text-center my-4'),
     html.Div(className='row', children=[
         html.Div(className='col-md-6', children=[
-            html.H3('Red Original', className='text-center my-4'),
-            html.Img(id='graph-image', className='img-fluid', style={'padding': '20px'}),
-            html.Button('Actualizar Imagen', id='update-button', n_clicks=0, className='btn btn-primary mb-3'),
+            html.Img(id='graph-image', className='img-fluid', style={'padding': '30px'})
         ]),
         html.Div(className='col-md-6', children=[
-            html.H3('Red Generada', className='text-center my-4'),
-            html.Img(id='graph-image-2', className='img-fluid', style={'padding': '20px'}),
+            html.Img(id='graph-image-2', className='img-fluid', style={'padding': '30px'}),
+        ]),
+    ]),
+    html.H3('Red Generada', className='text-center my-4'),
+    html.Div(className='row', children=[
+        html.Div(className='col-md-6', children=[
+            html.Img(id='graph-matrix-gen', className='img-fluid', style={'padding': '30px'})
+        ]),
+        html.Div(className='col-md-6', children=[
+            html.Img(id='graph-image-gen', className='img-fluid', style={'padding': '30px'}),
         ]),
     ]),
     html.Div(className='row', children=[
@@ -214,34 +242,48 @@ app.layout = html.Div(className='container', children=[
     ]),
 ])
 
-# @app.callback(
-#     Output('output-form', 'children'),
-#     [Input('update-form-button', 'n_clicks')],
-#     [State('input-integer-1', 'value'),
-#      State('input-integer-2', 'value'),
-#      State('input-text-1', 'value'),
-#      State('input-text-2', 'value'),
-#      State('input-text-3', 'value')]
-# )
-# def update_form(n_clicks, int1, int2, text1, text2, text3):
-#     return html.Div([
-#         html.P(f'Valor Entero 1dftgg: {int1}'),
-#         html.P(f'Valor Entero 2: {int2}'),
-#         html.P(f'Texto 1: {text1}'),
-#         html.P(f'Texto 2: {text2}'),
-#         html.P(f'Texto 3: {text3}')
-#     ])
-
 @app.callback(
     [Output('graph-image', 'src'),
     Output('graph-image-2', 'src')],
-    [Input('update-button', 'n_clicks')]
+    [Input('graph-button', 'n_clicks')]
 )
 def update_image(n_clicks):
-    image_base64 = plot_simple_df_net(df_matrix)
+    image_bw = print_bw_matrix(df_matrix)
+    image_net = plot_simple_df_net(df_matrix)
+    return ['data:image/png;base64,{}'.format(image_bw),
+    'data:image/png;base64,{}'.format(image_net)]
 
-    return ['data:image/png;base64,{}'.format(image_base64),
-    'data:image/png;base64,{}'.format(image_base64)]
+@app.callback(
+    [Output('graph-matrix-gen', 'src'),
+    Output('graph-image-gen', 'src')],
+    [Input('execute-button', 'n_clicks')]
+)
+def update_image_gen(n_clicks):
+    scaler = MinMaxScaler()
+    df_loads_temp = df_loads.set_index("time_step")
+    df_loads_temp = add_columns(df_loads_temp, 'va_degree_', max_size_nodes)
+    df_loads_temp = add_columns(df_loads_temp, 'res_p_', max_size_nodes)
+    df_loads_temp = add_columns(df_loads_temp, 'res_q_', max_size_nodes)
+    df_loads_temp = add_columns(df_loads_temp, 'vm_pu_', max_size_nodes)
+    df_loads_temp = df_loads_temp.fillna(0)
+    columnas_excluir = ['nodes_numbers', 'loads_number']
+    df_loads_temp[columnas_excluir] = df_loads_temp[columnas_excluir]
+    df_restantes = df_loads_temp.drop(columns=columnas_excluir).astype(float)
+    df_loads_temp = pd.concat([df_loads_temp[columnas_excluir], df_restantes], axis=1)
+    df_loads_temp = df_loads_temp.sort_index(axis=1)
+
+    X = df_loads_temp.values
+    X =  scaler.fit_transform(X)
+    num_samples = len(X) // num_intervals
+    X = X.reshape((num_samples,num_intervals,len(df_loads_temp.columns)))
+    # predicted_image = model_default.predict(X)
+    # test_image = predicted_image[0][0]
+
+    image_bw = print_bw_matrix(df_matrix_gen)
+    image_net = plot_simple_df_net(df_matrix_gen)
+    return ['data:image/png;base64,{}'.format(image_bw),
+    'data:image/png;base64,{}'.format(image_net)]
+
 
 @app.callback(
     [Output('histogram-graph', 'figure'),
@@ -264,39 +306,47 @@ def update_histogram(selected_data):
     fig = px.line(df_loads, x='time_step', y=selected_column[selected_data])
     return [ fig ,table_data,columns]
 
+
 @app.callback(
-    Output('output-form', 'children'),
+    [Output('dynamic-content', 'children'),
+     Output('execute-button', 'style'),
+     Output('graph-button', 'style')],
     Input('upload-data', 'contents'),
-    State('upload-data', 'filename'),
-    State('upload-data', 'last_modified')
+    State('upload-data', 'filename')
 )
-def update_output(contents, filename, last_modified):
+def update_dynamic_content(contents, filename):
+    global df_matrix
+    global df_loads
     if contents is not None:
         content_type, content_string = contents.split(',')
         decoded = base64.b64decode(content_string)
         try:
-            if 'csv' in filename:
-                # Asumiendo que el archivo subido es un CSV
-                global df_loads # = pd.read_csv(StringIO(decoded.decode('utf-8')),header=[0])
-                df_loads = pd.read_csv(StringIO(decoded.decode('utf-8')),header=[0])
-            elif 'xls' in filename:
-                # Asumiendo que el archivo subido es un Excel
-                df = pd.read_excel(BytesIO(decoded))
-            return html.Div([
-                    'el archivo fue procesado.'
-                ])
-            
-            # [ html.Div([
-            #     html.H5(filename),
-            #     dash_table.DataTable(
-            #         data=df.to_dict('records'),
-            #         columns=[{'name': i, 'id': i} for i in df.columns]
-            #     )
-            # ]) , df_loads]
+            if 'load.csv' in filename:
+                df_loads = pd.read_csv(StringIO(decoded.decode('utf-8')), header=[0])
+                return (
+                    html.Div([
+                        html.Label('Modelo de Reconstrucción:', className='form-label'),
+                        dcc.Dropdown(
+                            id='model-selector',
+                            options=[{'label': model, 'value': model} for model in model_names_files],
+                            value=model_names_files[0],
+                        )
+                    ]),
+                    {'display': 'block'},
+                    {'display': 'none'}
+                )
+            elif 'incidence_matrix.csv' in filename:
+                df_matrix = pd.read_csv(StringIO(decoded.decode('utf-8')), header=[0])
+                df_matrix.rename(columns={"Unnamed: 0": "lines_id"}, inplace=True)
+                df_matrix.set_index("lines_id", inplace=True)
+                return (
+                    html.Div(),
+                    {'display': 'none'},
+                    {'display': 'block'}
+                )
         except Exception as e:
-            return html.Div([
-                'Hubo un error al procesar el archivo.'
-            ])
+            return html.Div(['Hubo un error al procesar el archivo.']), {'display': 'none'}, {'display': 'none'}
+    return html.Div(), {'display': 'none'}, {'display': 'none'}
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run_server(debug=True)
