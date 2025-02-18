@@ -26,6 +26,12 @@ num_intervals = 48
 num_scenarios = 5
 time_steps_simulation = num_intervals * 14
 
+model_output_path ="./Microservices/Modelos/{}"
+model_default = joblib.load(model_output_path.format("model_lstm_cnn_V3_final"))
+model_files = [os.path.join(model_output_path.format(""), str(nombre)) for nombre in os.listdir(model_output_path.format(""))]
+model_names_files = [nombre for nombre in os.listdir(model_output_path.format(""))]
+static_image_path = '/assets/logo_ucm_ntic.png'
+
 base_output_path = f"./Microservices/Data"
 common_folder=f"{base_output_path}/default"
 loads_files=f"{common_folder}/load/load.csv"
@@ -46,7 +52,8 @@ va_degree_columns = [column for column in df_loads.columns if 'va_degree' in col
 external_stylesheets = ['https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css']
 
 
-def ajustar_celdas(df,y=0.4):
+@staticmethod
+def ajustar_celdas(df:pd.DataFrame,y=0.4):
     df_nuevo = pd.DataFrame(0, index=df.index, columns=df.columns)
     for col in df.columns:
         top_values = df[col].nlargest(2)
@@ -59,7 +66,6 @@ def ajustar_celdas(df,y=0.4):
             if len(top_indices) > 1:
                 df_nuevo.loc[top_indices[1], col] = 5
     return df_nuevo
-
 
 @staticmethod
 def create_network(net_type=0):
@@ -74,7 +80,7 @@ def create_network(net_type=0):
     return net
 
 @staticmethod
-def print_bw_matrix(df):
+def print_bw_matrix(df:pd.DataFrame):
     fig, ax = mplt.subplots(figsize=(5, 5))
     mplt.matshow(df, cmap='gray', fignum=fig.number)
     mplt.xticks(ticks=np.arange(df.shape[1]), labels=df.columns)
@@ -147,19 +153,53 @@ def add_columns(df, prefix, total_columns):
 
    return df
 
-model_output_path ="./Microservices/Modelos/{}"
-model_default = joblib.load(model_output_path.format("model_lstm_cnn_V3_final"))
+@staticmethod
+def execute_model():
+    scaler = MinMaxScaler()
+    df_loads_temp = df_loads.set_index("time_step")
+    df_loads_temp = add_columns(df_loads_temp, 'va_degree_', max_size_nodes)
+    df_loads_temp = add_columns(df_loads_temp, 'res_p_', max_size_nodes)
+    df_loads_temp = add_columns(df_loads_temp, 'res_q_', max_size_nodes)
+    df_loads_temp = add_columns(df_loads_temp, 'vm_pu_', max_size_nodes)
+    df_loads_temp = df_loads_temp.fillna(0)
+    columnas_excluir = ['nodes_numbers', 'loads_number']
+    df_loads_temp[columnas_excluir] = df_loads_temp[columnas_excluir]
+    df_restantes = df_loads_temp.drop(columns=columnas_excluir).astype(float)
+    df_loads_temp = pd.concat([df_loads_temp[columnas_excluir], df_restantes], axis=1)
+    df_loads_temp = df_loads_temp.sort_index(axis=1)
 
-model_files = [os.path.join(model_output_path.format(""), str(nombre)) for nombre in os.listdir(model_output_path.format(""))]
-model_names_files = [nombre for nombre in os.listdir(model_output_path.format(""))]
-
-
-static_image_path = '/assets/logo_ucm_ntic.png'
-
+    X = df_loads_temp.values
+    X =  scaler.fit_transform(X)
+    num_samples = len(X) // num_intervals
+    X = X.reshape((num_samples,num_intervals,len(df_loads_temp.columns)))
+    try:
+        predicted_image = model_default.predict(X)
+        test_image = predicted_image[0][0]
+        data_out = []
+        for i in range(test_image.shape[0]):
+            row = []
+            for j in range(test_image.shape[1]):
+                val = test_image[i, j]
+                row.append(val)
+            data_out.append(row)
+        
+        df_topo_out = pd.DataFrame(data_out, columns=[f'{i}' for i in range(test_image.shape[1])])
+        df_topo_out = ajustar_celdas(df_topo_out,y=0.0)
+        df_topo_out =df_topo_out.transpose()
+        image_bw = print_bw_matrix(df_topo_out)
+        image_net = plot_simple_df_net(df_topo_out)
+        print("Update image")
+    except Exception as error:
+        print(f"Fail Update image :  {error}")
+        image_bw = print_bw_matrix(df_matrix_gen)
+        image_net = plot_simple_df_net(df_matrix_gen)
+    return image_bw ,image_net
 
 
 app = Dash(__name__ ,external_stylesheets=external_stylesheets) # 
 server = app.server 
+app.config.prevent_initial_callbacks = 'initial_duplicate'
+
 
 app.layout = html.Div(className='container', children=[
     html.H1('Electric Network Reconstruction System ENRS', className='text-center my-4'),
@@ -185,7 +225,13 @@ app.layout = html.Div(className='container', children=[
                         multiple=False
                     ),
                 ]),
-               html.Div(id='dynamic-content', className='col-md-8'),
+            html.Div(id='dynamic-content', className='col-md-8'),
+            dcc.Dropdown(
+                            id='model-selector',
+                            options=[{'label': model, 'value': model} for model in model_names_files],
+                            value=model_names_files[0],
+                            style={'display': 'none'}
+                        ),
             html.Button('Ejecutar', id='execute-button', n_clicks=0, className='btn btn-success mt-3', style={'display': 'none'}),
             html.Button('Actualizar Imagen', id='graph-button', n_clicks=0, className='btn btn-primary mt-3', style={'display': 'none'}),
         ]),
@@ -275,48 +321,22 @@ def update_image(n_clicks):
     [Input('execute-button', 'n_clicks')]
 )
 def update_image_gen(n_clicks):
-    scaler = MinMaxScaler()
-    df_loads_temp = df_loads.set_index("time_step")
-    df_loads_temp = add_columns(df_loads_temp, 'va_degree_', max_size_nodes)
-    df_loads_temp = add_columns(df_loads_temp, 'res_p_', max_size_nodes)
-    df_loads_temp = add_columns(df_loads_temp, 'res_q_', max_size_nodes)
-    df_loads_temp = add_columns(df_loads_temp, 'vm_pu_', max_size_nodes)
-    df_loads_temp = df_loads_temp.fillna(0)
-    columnas_excluir = ['nodes_numbers', 'loads_number']
-    df_loads_temp[columnas_excluir] = df_loads_temp[columnas_excluir]
-    df_restantes = df_loads_temp.drop(columns=columnas_excluir).astype(float)
-    df_loads_temp = pd.concat([df_loads_temp[columnas_excluir], df_restantes], axis=1)
-    df_loads_temp = df_loads_temp.sort_index(axis=1)
-
-    X = df_loads_temp.values
-    X =  scaler.fit_transform(X)
-    num_samples = len(X) // num_intervals
-    X = X.reshape((num_samples,num_intervals,len(df_loads_temp.columns)))
-    try:
-        predicted_image = model_default.predict(X)
-        test_image = predicted_image[0][0]
-        data_out = []
-        for i in range(test_image.shape[0]):
-            row = []
-            for j in range(test_image.shape[1]):
-                val = test_image[i, j]
-                row.append(val)
-            data_out.append(row)
-        
-        df_topo_out = pd.DataFrame(data_out, columns=[f'{i}' for i in range(test_image.shape[1])])
-        df_topo_out = ajustar_celdas(df_topo_out,y=0.0)
-        df_topo_out =df_topo_out.transpose()
-        image_bw = print_bw_matrix(df_topo_out)
-        image_net = plot_simple_df_net(df_topo_out)
-        print("Update image")
-    except Exception as error:
-        print(f"Fail Update image :  {error}")
-        image_bw = print_bw_matrix(df_matrix_gen)
-        image_net = plot_simple_df_net(df_matrix_gen)
-
+    image_bw ,image_net = execute_model()
     return ['data:image/png;base64,{}'.format(image_bw),
     'data:image/png;base64,{}'.format(image_net)]
 
+@app.callback(
+    [Output('graph-matrix-gen', 'src',allow_duplicate=True),
+     Output('graph-image-gen', 'src',allow_duplicate=True)],
+    Input('model-selector', 'value')
+)
+def update_model(selected_data):
+    global model_default
+    model_output_path = "./Microservices/Modelos/{}"
+    model_default = joblib.load(model_output_path.format(selected_data))
+    image_bw ,image_net = execute_model()
+    return ['data:image/png;base64,{}'.format(image_bw),
+    'data:image/png;base64,{}'.format(image_net)]
 
 @app.callback(
     [Output('histogram-graph', 'figure'),
