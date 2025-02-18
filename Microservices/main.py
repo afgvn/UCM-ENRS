@@ -45,20 +45,21 @@ vm_columns = [column for column in df_loads.columns if 'vm' in column]
 va_degree_columns = [column for column in df_loads.columns if 'va_degree' in column]
 external_stylesheets = ['https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css']
 
-@staticmethod
+
 def ajustar_celdas(df,y=0.4):
     df_nuevo = pd.DataFrame(0, index=df.index, columns=df.columns)
     for col in df.columns:
         top_values = df[col].nlargest(2)
         if len(top_values) > 0:
             top_indices = top_values.index
-            if top_values.sum() < y :
-                continue
+            # if top_values.sum() < y :
+            #     continue
             if len(top_indices) > 0:
-                df_nuevo.loc[top_indices[0], col] = 0.68
+                df_nuevo.loc[top_indices[0], col] =3
             if len(top_indices) > 1:
-                df_nuevo.loc[top_indices[1], col] = 1
+                df_nuevo.loc[top_indices[1], col] = 5
     return df_nuevo
+
 
 @staticmethod
 def create_network(net_type=0):
@@ -87,7 +88,7 @@ def print_bw_matrix(df):
     return image_base64
 
 @staticmethod
-def plot_simple_df_net(df, is_print_lines=False):
+def plot_simple_df_net(df:pd.DataFrame):
     df = df.transpose()
     net = pp.create_empty_network()
     buses = [pp.create_bus(net, vn_kv=110, name=f"Bus {bus}") for bus in range(len(df.index))]
@@ -97,9 +98,9 @@ def plot_simple_df_net(df, is_print_lines=False):
         from_bus = None
         to_bus = None
         for i, value in df[col].items():
-                if value == 0.68 and from_bus is None:
+                if value == 5 and from_bus is None:
                         from_bus = int(i)
-                if value == 1 and to_bus is None:
+                if value == 3 and to_bus is None:
                         to_bus = int(i)
         
         if  (not from_bus is None and 
@@ -147,7 +148,7 @@ def add_columns(df, prefix, total_columns):
    return df
 
 model_output_path ="./Microservices/Modelos/{}"
-model_default = joblib.load(model_output_path.format("model_lstm_cnn_V1_final"))
+model_default = joblib.load(model_output_path.format("model_lstm_cnn_V3_final"))
 
 model_files = [os.path.join(model_output_path.format(""), str(nombre)) for nombre in os.listdir(model_output_path.format(""))]
 model_names_files = [nombre for nombre in os.listdir(model_output_path.format(""))]
@@ -303,7 +304,8 @@ def update_image_gen(n_clicks):
             data_out.append(row)
         
         df_topo_out = pd.DataFrame(data_out, columns=[f'{i}' for i in range(test_image.shape[1])])
-        df_topo_out = ajustar_celdas(df_topo_out,y=0.2)
+        df_topo_out = ajustar_celdas(df_topo_out,y=0.0)
+        df_topo_out =df_topo_out.transpose()
         image_bw = print_bw_matrix(df_topo_out)
         image_net = plot_simple_df_net(df_topo_out)
         print("Update image")
