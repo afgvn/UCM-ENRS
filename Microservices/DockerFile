@@ -3,12 +3,16 @@ FROM python:3.11.7-slim-bullseye
 RUN groupadd -r python && useradd --no-log-init -r -g python python
 
 RUN apt update && \
-    apt install -y --no-install-recommends gcc libpq-dev build-essential cargo \
+    apt install -y --no-install-recommends curl sed gnupg gcc libpq-dev build-essential cargo \
     && rm -rf /var/lib/apt/lists/*
+
 
 RUN ln -s /usr/include/locate.h /usr/include/xlocate.h
 
 ENV PYTHONUNBUFFERED=1 APP_HOME=/ENRS/
+ENV CUDA_VISIBLE_DEVICES=""
+ENV LD_LIBRARY_PATH=/usr/local/cuda/lib64
+ENV CUDA_HOME=/usr/local/cuda
 
 RUN mkdir $APP_HOME
 RUN chown -R python:python $APP_HOME
@@ -20,11 +24,15 @@ RUN pip install --upgrade pip
 COPY ./requirements.txt .
 RUN pip install -r requirements.txt
 
-RUN mkdir /Microservices
-RUN mkdir /Microservices/Data
-COPY ./Microservices/Data/ /Microservices/Data/
+RUN mkdir -p /Microservices/Data /Microservices/Modelos /assets
+
+COPY ./Data/ ./Microservices/Data/
+COPY ./assets/ /assets/
+COPY ./Modelos/ ./Microservices/Modelos/
 
 RUN pip install gunicorn==21.2.0
+
+
 
 EXPOSE 8050
 USER python

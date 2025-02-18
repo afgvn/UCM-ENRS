@@ -46,6 +46,21 @@ va_degree_columns = [column for column in df_loads.columns if 'va_degree' in col
 external_stylesheets = ['https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css']
 
 @staticmethod
+def ajustar_celdas(df,y=0.4):
+    df_nuevo = pd.DataFrame(0, index=df.index, columns=df.columns)
+    for col in df.columns:
+        top_values = df[col].nlargest(2)
+        if len(top_values) > 0:
+            top_indices = top_values.index
+            if top_values.sum() < y :
+                continue
+            if len(top_indices) > 0:
+                df_nuevo.loc[top_indices[0], col] = 0.68
+            if len(top_indices) > 1:
+                df_nuevo.loc[top_indices[1], col] = 1
+    return df_nuevo
+
+@staticmethod
 def create_network(net_type=0):
     if net_type == 0:
         net =pn.simple_four_bus_system()
@@ -72,7 +87,7 @@ def print_bw_matrix(df):
     return image_base64
 
 @staticmethod
-def plot_simple_df_net(df:pd.DataFrame):
+def plot_simple_df_net(df, is_print_lines=False):
     df = df.transpose()
     net = pp.create_empty_network()
     buses = [pp.create_bus(net, vn_kv=110, name=f"Bus {bus}") for bus in range(len(df.index))]
@@ -82,9 +97,9 @@ def plot_simple_df_net(df:pd.DataFrame):
         from_bus = None
         to_bus = None
         for i, value in df[col].items():
-                if value == 5 and from_bus is None:
+                if value == 0.68 and from_bus is None:
                         from_bus = int(i)
-                if value == 3 and to_bus is None:
+                if value == 1 and to_bus is None:
                         to_bus = int(i)
         
         if  (not from_bus is None and 
@@ -276,11 +291,27 @@ def update_image_gen(n_clicks):
     X =  scaler.fit_transform(X)
     num_samples = len(X) // num_intervals
     X = X.reshape((num_samples,num_intervals,len(df_loads_temp.columns)))
-    # predicted_image = model_default.predict(X)
-    # test_image = predicted_image[0][0]
+    try:
+        predicted_image = model_default.predict(X)
+        test_image = predicted_image[0][0]
+        data_out = []
+        for i in range(test_image.shape[0]):
+            row = []
+            for j in range(test_image.shape[1]):
+                val = test_image[i, j]
+                row.append(val)
+            data_out.append(row)
+        
+        df_topo_out = pd.DataFrame(data_out, columns=[f'{i}' for i in range(test_image.shape[1])])
+        df_topo_out = ajustar_celdas(df_topo_out,y=0.2)
+        image_bw = print_bw_matrix(df_topo_out)
+        image_net = plot_simple_df_net(df_topo_out)
+        print("Update image")
+    except Exception as error:
+        print(f"Fail Update image :  {error}")
+        image_bw = print_bw_matrix(df_matrix_gen)
+        image_net = plot_simple_df_net(df_matrix_gen)
 
-    image_bw = print_bw_matrix(df_matrix_gen)
-    image_net = plot_simple_df_net(df_matrix_gen)
     return ['data:image/png;base64,{}'.format(image_bw),
     'data:image/png;base64,{}'.format(image_net)]
 
